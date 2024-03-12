@@ -1,0 +1,15 @@
+{
+	"name": "GraphQL Schema",
+	"schemaPath": "cloudflare-schema.graphql",
+	"extensions": {
+		"endpoints": {
+			"Cloudflare": {
+				"url": "https://api.cloudflare.com/client/v4/graphql",
+				"headers": {
+					"user-agent": "JS GraphQL"
+				},
+				"introspect": false
+			}
+		}
+	}
+}
