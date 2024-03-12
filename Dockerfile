@@ -10,7 +10,7 @@ RUN asdf install
 ADD go.mod go.sum ./
 RUN go mod download
 ADD . .
-RUN go build -o .build/cloudflare-syncer -ldflags "-w -s" ./cmd/cloudflare-syncer
+RUN go build -o .build/cloudflare-syncer -ldflags "-w -s" .
 
 FROM gcr.io/distroless/static
 
