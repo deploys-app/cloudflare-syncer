@@ -431,6 +431,10 @@ func (w *Worker) createDomain(ctx context.Context, d *domain) error {
 				// Please check your input and try again. (1407)
 				return w.setDomainStatus(ctx, d.ID, api.DomainStatusError)
 			}
+			if lo.Contains(serr.ErrorCodes(), 1411) {
+				// Custom hostnames ending in example.com, example.net, or example.org are prohibited.
+				return w.setDomainStatus(ctx, d.ID, api.DomainStatusError)
+			}
 		}
 	}
 	if err != nil {
