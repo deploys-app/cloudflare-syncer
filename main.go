@@ -435,6 +435,10 @@ func (w *Worker) createDomain(ctx context.Context, d *domain) error {
 				// Custom hostnames ending in example.com, example.net, or example.org are prohibited.
 				return w.setDomainStatus(ctx, d.ID, api.DomainStatusError)
 			}
+			if lo.Contains(serr.ErrorCodes(), 1461) {
+				// The provided authority is not valid for the provided hostname. Pick a different authority and try again.
+				return w.setDomainStatus(ctx, d.ID, api.DomainStatusError)
+			}
 		}
 	}
 	if err != nil {
