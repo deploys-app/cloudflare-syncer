@@ -146,10 +146,13 @@ func (w *Worker) Run() {
 		slog.Info("processing", "id", d.ID, "location", d.LocationID, "domain", d.Domain, "action", d.Action)
 
 		var err error
-		switch d.Action {
-		case api.Create:
+		switch {
+		case d.Action == api.Create && d.CDN:
 			err = w.createDomain(ctx, d)
-		case api.Delete:
+		case d.Action == api.Create && !d.CDN:
+			slog.Info("domain pending but not cdn, deleting...", "domain", d.Domain)
+			err = w.deleteDomain(ctx, d)
+		case d.Action == api.Delete:
 			err = w.deleteDomain(ctx, d)
 		}
 		if err != nil {
@@ -246,7 +249,7 @@ func (w *Worker) getPendingDomains(ctx context.Context) ([]*domain, error) {
 	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
 		var x domain
 		err := scan(
-			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.Action, &x.Status,
+			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.Action, &x.Status,
 		)
 		if err != nil {
 			return err
@@ -255,9 +258,9 @@ func (w *Worker) getPendingDomains(ctx context.Context) ([]*domain, error) {
 		return nil
 	},
 		`
-			select id, project_id, location_id, domain, wildcard, action, status
+			select id, project_id, location_id, domain, wildcard, cdn, action, status
 			from domains
-			where status = $1 and cdn = true
+			where status = $1
 			order by created_at
 		`, api.DomainStatusPending,
 	)
@@ -272,7 +275,7 @@ func (w *Worker) getAllDomainsForStatus(ctx context.Context) ([]*domain, error) 
 	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
 		var x domain
 		err := scan(
-			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.Action, &x.Status,
+			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.Action, &x.Status,
 		)
 		if err != nil {
 			return err
@@ -281,7 +284,7 @@ func (w *Worker) getAllDomainsForStatus(ctx context.Context) ([]*domain, error) 
 		return nil
 	},
 		`
-			select id, project_id, location_id, domain, wildcard, action, status
+			select id, project_id, location_id, domain, wildcard, cdn, action, status
 			from domains
 			where action = $1 and status = any($2) and cdn = true
 			order by created_at
@@ -298,7 +301,7 @@ func (w *Worker) getAllDomainsForCollect(ctx context.Context) ([]*domain, error)
 	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
 		var x domain
 		err := scan(
-			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.Action, &x.Status,
+			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.Action, &x.Status,
 		)
 		if err != nil {
 			return err
@@ -307,7 +310,7 @@ func (w *Worker) getAllDomainsForCollect(ctx context.Context) ([]*domain, error)
 		return nil
 	},
 		`
-			select id, project_id, location_id, domain, wildcard, action, status
+			select id, project_id, location_id, domain, wildcard, cdn, action, status
 			from domains
 			where action = $1 and cdn = true
 			order by created_at
@@ -324,7 +327,7 @@ func (w *Worker) getAllDomainsVerify(ctx context.Context) ([]*domain, error) {
 	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
 		var x domain
 		err := scan(
-			&x.ID, &x.LocationID, &x.Domain, &x.Wildcard, &x.Action, &x.Status,
+			&x.ID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.Action, &x.Status,
 		)
 		if err != nil {
 			return err
@@ -333,7 +336,7 @@ func (w *Worker) getAllDomainsVerify(ctx context.Context) ([]*domain, error) {
 		return nil
 	},
 		`
-			select id, location_id, domain, wildcard, action, status
+			select id, location_id, domain, wildcard, cdn, action, status
 			from domains
 			where action = $1 and cdn = true and (status = $2 or verification->'ssl'->>'pending' = 'true')
 			order by created_at
@@ -389,6 +392,7 @@ type domain struct {
 	LocationID string
 	Domain     string
 	Wildcard   bool
+	CDN        bool
 	Action     api.Action
 	Status     api.DomainStatus
 }
