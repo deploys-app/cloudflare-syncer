@@ -484,7 +484,7 @@ func (w *Worker) createDomain(ctx context.Context, d *domain) error {
 func (w *Worker) deleteDomain(ctx context.Context, d *domain) error {
 	deleteDomain := func() error {
 		if !d.CDN {
-			return nil
+			return w.setDomainStatus(ctx, d.ID, api.DomainStatusSuccess)
 		}
 		return w.removeDomain(ctx, d.ID)
 	}
