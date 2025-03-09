@@ -167,8 +167,10 @@ func (w *Worker) Run() {
 
 	if time.Since(w.lastCollect) >= time.Hour {
 		w.lastCollect = time.Now()
-		w.runCollect(ctx)
-		w.summaryProjectUsage(ctx)
+		go func() {
+			w.runCollect(ctx)
+			w.summaryProjectUsage(ctx)
+		}()
 	}
 
 	running := atomic.LoadUint32(&w.statusRunning)
