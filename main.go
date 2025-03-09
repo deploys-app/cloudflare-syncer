@@ -462,18 +462,25 @@ func (w *Worker) createDomain(ctx context.Context, d *domain) error {
 }
 
 func (w *Worker) deleteDomain(ctx context.Context, d *domain) error {
+	deleteDomain := func() error {
+		if !d.CDN {
+			return nil
+		}
+		return w.removeDomain(ctx, d.ID)
+	}
+
 	hostnameID, err := w.Client.CustomHostnameIDByName(ctx, w.ZoneID, d.Domain)
 	{
 		var serr *cloudflare.RequestError
 		if errors.As(err, &serr) {
 			if lo.Contains(serr.ErrorCodes(), 1407) {
-				return w.removeDomain(ctx, d.ID)
+				return deleteDomain()
 			}
 		}
 	}
 	if err != nil {
 		if err.Error() == "CustomHostname could not be found" { // TODO: cloudflare-go hardcode this error
-			return w.removeDomain(ctx, d.ID)
+			return deleteDomain()
 		}
 		return err
 	}
@@ -483,7 +490,7 @@ func (w *Worker) deleteDomain(ctx context.Context, d *domain) error {
 		return err
 	}
 
-	return w.removeDomain(ctx, d.ID)
+	return deleteDomain()
 }
 
 func (w *Worker) updateStatus(ctx context.Context, d *domain) error {
