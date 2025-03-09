@@ -126,10 +126,12 @@ type Worker struct {
 	ZoneID string
 	Token  string
 
-	lastPending   time.Time
-	lastCollect   time.Time
-	lastStatus    time.Time
-	statusRunning uint32
+	lastPending    time.Time
+	pendingRunning uint32
+	lastCollect    time.Time
+	collectRunning uint32
+	lastStatus     time.Time
+	statusRunning  uint32
 }
 
 func (w *Worker) Run() {
@@ -160,24 +162,43 @@ func (w *Worker) Run() {
 		}
 	}
 
-	if time.Since(w.lastPending) >= 10*time.Second {
+	var running uint32
+
+	running = atomic.LoadUint32(&w.pendingRunning)
+	if running == 0 && time.Since(w.lastPending) >= 10*time.Second {
 		w.lastPending = time.Now()
-		w.runStatusVerify()
+		go func() {
+			atomic.StoreUint32(&w.pendingRunning, 1)
+			defer atomic.StoreUint32(&w.pendingRunning, 0)
+
+			w.runStatusVerify()
+		}()
 	}
 
-	if time.Since(w.lastCollect) >= time.Hour {
+	running = atomic.LoadUint32(&w.collectRunning)
+	if running == 0 && time.Since(w.lastCollect) >= time.Hour {
 		w.lastCollect = time.Now()
 		go func() {
+			atomic.StoreUint32(&w.collectRunning, 1)
+			defer atomic.StoreUint32(&w.collectRunning, 0)
+
 			w.runCollect(ctx)
 			w.summaryProjectUsage(ctx)
 		}()
 	}
 
-	running := atomic.LoadUint32(&w.statusRunning)
+	running = atomic.LoadUint32(&w.statusRunning)
 	if running == 0 && time.Since(w.lastStatus) > 6*time.Hour {
 		w.lastStatus = time.Now()
-		go w.runStatus()
+		go func() {
+			atomic.StoreUint32(&w.statusRunning, 1)
+			defer atomic.StoreUint32(&w.statusRunning, 0)
+
+			w.runStatus()
+		}()
 	}
+
+	time.Sleep(3 * time.Second)
 }
 
 func (w *Worker) runStatusVerify() {
@@ -205,9 +226,6 @@ func (w *Worker) runStatusVerify() {
 }
 
 func (w *Worker) runStatus() {
-	atomic.StoreUint32(&w.statusRunning, 1)
-	defer atomic.StoreUint32(&w.statusRunning, 0)
-
 	defer slog.Info("status: finished")
 
 	ctx := context.Background()
