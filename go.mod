@@ -1,6 +1,6 @@
 module github.com/deploys-app/cloudflare-syncer
 
-go 1.24.1
+go 1.26.3
 
 require (
 	cloud.google.com/go/pubsub v1.47.0
