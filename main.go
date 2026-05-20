@@ -27,6 +27,8 @@ import (
 	"github.com/samber/lo"
 )
 
+const cdnTypeCloudflare = "cloudflare"
+
 func main() {
 	cfg := configfile.NewEnvReader()
 
@@ -269,7 +271,7 @@ func (w *Worker) getPendingDomains(ctx context.Context) ([]*domain, error) {
 	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
 		var x domain
 		err := scan(
-			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.Action, &x.Status,
+			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.CDNType, &x.Action, &x.Status,
 		)
 		if err != nil {
 			return err
@@ -278,11 +280,11 @@ func (w *Worker) getPendingDomains(ctx context.Context) ([]*domain, error) {
 		return nil
 	},
 		`
-			select id, project_id, location_id, domain, wildcard, cdn, action, status
+			select id, project_id, location_id, domain, wildcard, cdn, cdn_type, action, status
 			from domains
-			where status = $1
+			where status = $1 and cdn_type = $2
 			order by created_at
-		`, api.DomainStatusPending,
+		`, api.DomainStatusPending, cdnTypeCloudflare,
 	)
 	if err != nil {
 		return nil, err
@@ -295,7 +297,7 @@ func (w *Worker) getAllDomainsForStatus(ctx context.Context) ([]*domain, error) 
 	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
 		var x domain
 		err := scan(
-			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.Action, &x.Status,
+			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.CDNType, &x.Action, &x.Status,
 		)
 		if err != nil {
 			return err
@@ -304,11 +306,11 @@ func (w *Worker) getAllDomainsForStatus(ctx context.Context) ([]*domain, error) 
 		return nil
 	},
 		`
-			select id, project_id, location_id, domain, wildcard, cdn, action, status
+			select id, project_id, location_id, domain, wildcard, cdn, cdn_type, action, status
 			from domains
-			where action = $1 and status = any($2) and cdn = true
+			where action = $1 and status = any($2) and cdn = true and cdn_type = $3
 			order by created_at
-		`, api.Create, pq.Array([]int64{int64(api.DomainStatusSuccess), int64(api.DomainStatusError)}),
+		`, api.Create, pq.Array([]int64{int64(api.DomainStatusSuccess), int64(api.DomainStatusError)}), cdnTypeCloudflare,
 	)
 	if err != nil {
 		return nil, err
@@ -321,7 +323,7 @@ func (w *Worker) getAllDomainsForCollect(ctx context.Context) ([]*domain, error)
 	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
 		var x domain
 		err := scan(
-			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.Action, &x.Status,
+			&x.ID, &x.ProjectID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.CDNType, &x.Action, &x.Status,
 		)
 		if err != nil {
 			return err
@@ -330,11 +332,11 @@ func (w *Worker) getAllDomainsForCollect(ctx context.Context) ([]*domain, error)
 		return nil
 	},
 		`
-			select id, project_id, location_id, domain, wildcard, cdn, action, status
+			select id, project_id, location_id, domain, wildcard, cdn, cdn_type, action, status
 			from domains
-			where action = $1 and cdn = true
+			where action = $1 and cdn = true and cdn_type = $2
 			order by created_at
-		`, api.Create,
+		`, api.Create, cdnTypeCloudflare,
 	)
 	if err != nil {
 		return nil, err
@@ -347,7 +349,7 @@ func (w *Worker) getAllDomainsVerify(ctx context.Context) ([]*domain, error) {
 	err := pgctx.Iter(ctx, func(scan pgsql.Scanner) error {
 		var x domain
 		err := scan(
-			&x.ID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.Action, &x.Status,
+			&x.ID, &x.LocationID, &x.Domain, &x.Wildcard, &x.CDN, &x.CDNType, &x.Action, &x.Status,
 		)
 		if err != nil {
 			return err
@@ -356,11 +358,12 @@ func (w *Worker) getAllDomainsVerify(ctx context.Context) ([]*domain, error) {
 		return nil
 	},
 		`
-			select id, location_id, domain, wildcard, cdn, action, status
+			select id, location_id, domain, wildcard, cdn, cdn_type, action, status
 			from domains
-			where action = $1 and cdn = true and (status = $2 or verification->'ssl'->>'pending' = 'true')
+			where action = $1 and cdn = true and cdn_type = $2
+			  and (status = $3 or verification->'ssl'->>'pending' = 'true')
 			order by created_at
-		`, api.Create, api.DomainStatusVerify,
+		`, api.Create, cdnTypeCloudflare, api.DomainStatusVerify,
 	)
 	if err != nil {
 		return nil, err
@@ -406,6 +409,15 @@ func (w *Worker) removeDomain(ctx context.Context, id int64) error {
 	return err
 }
 
+func (w *Worker) clearDomainCDN(ctx context.Context, id int64) error {
+	_, err := pgctx.Exec(ctx, `
+		update domains
+		set status = $2, cdn_type = ''
+		where id = $1
+	`, id, api.DomainStatusSuccess)
+	return err
+}
+
 type domain struct {
 	ID         int64
 	ProjectID  int64
@@ -413,6 +425,7 @@ type domain struct {
 	Domain     string
 	Wildcard   bool
 	CDN        bool
+	CDNType    string
 	Action     api.Action
 	Status     api.DomainStatus
 }
@@ -484,7 +497,7 @@ func (w *Worker) createDomain(ctx context.Context, d *domain) error {
 func (w *Worker) deleteDomain(ctx context.Context, d *domain) error {
 	deleteDomain := func() error {
 		if !d.CDN {
-			return w.setDomainStatus(ctx, d.ID, api.DomainStatusSuccess)
+			return w.clearDomainCDN(ctx, d.ID)
 		}
 		return w.removeDomain(ctx, d.ID)
 	}
