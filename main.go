@@ -575,21 +575,6 @@ func (w *Worker) updateStatus(ctx context.Context, d *domain) error {
 		}
 	}
 
-	// auto update settings
-	// if x.SSL != nil {
-	// 	if !isSSLSettingsUpToDate(x.SSL.Settings) {
-	// 		logs.Infof("ssl outdated; domain=%s, updating...", d.Domain)
-	// 		x.SSL.Settings = sslSettings
-	// 		resp, err := w.Client.UpdateCustomHostnameSSL(ctx, w.ZoneID, hostnameID, x.SSL)
-	// 		if err != nil {
-	// 			return err
-	// 		}
-	// 		if !resp.Success {
-	// 			logs.Infof("update ssl failed; domain=%s, error=%v", d.Domain, resp.Errors)
-	// 		}
-	// 	}
-	// }
-
 	{
 		var info api.DomainVerification
 		info.Ownership.Name = x.OwnershipVerification.Name
@@ -644,14 +629,6 @@ var sslSettings = cloudflare.CustomHostnameSSLSettings{
 	TLS13:         "on",
 	MinTLSVersion: "1.2",
 	EarlyHints:    "on",
-}
-
-func isSSLSettingsUpToDate(s cloudflare.CustomHostnameSSLSettings) bool {
-	return s.HTTP2 == sslSettings.HTTP2 &&
-		// s.HTTP3 == sslSettings.HTTP3 &&
-		s.TLS13 == sslSettings.TLS13 &&
-		s.MinTLSVersion == sslSettings.MinTLSVersion &&
-		s.EarlyHints == sslSettings.EarlyHints
 }
 
 func (w *Worker) collectCacheHit(ctx context.Context, d *domain, datetime time.Time) error {
