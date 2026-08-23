@@ -129,11 +129,11 @@ type Worker struct {
 	Token  string
 
 	lastPending    time.Time
-	pendingRunning uint32
+	pendingRunning atomic.Uint32
 	lastCollect    time.Time
-	collectRunning uint32
+	collectRunning atomic.Uint32
 	lastStatus     time.Time
-	statusRunning  uint32
+	statusRunning  atomic.Uint32
 }
 
 func (w *Worker) Run() {
@@ -166,35 +166,35 @@ func (w *Worker) Run() {
 
 	var running uint32
 
-	running = atomic.LoadUint32(&w.pendingRunning)
+	running = w.pendingRunning.Load()
 	if running == 0 && time.Since(w.lastPending) >= 10*time.Second {
 		w.lastPending = time.Now()
 		go func() {
-			atomic.StoreUint32(&w.pendingRunning, 1)
-			defer atomic.StoreUint32(&w.pendingRunning, 0)
+			w.pendingRunning.Store(1)
+			defer w.pendingRunning.Store(0)
 
 			w.runStatusVerify()
 		}()
 	}
 
-	running = atomic.LoadUint32(&w.collectRunning)
+	running = w.collectRunning.Load()
 	if running == 0 && time.Since(w.lastCollect) >= time.Hour {
 		w.lastCollect = time.Now()
 		go func() {
-			atomic.StoreUint32(&w.collectRunning, 1)
-			defer atomic.StoreUint32(&w.collectRunning, 0)
+			w.collectRunning.Store(1)
+			defer w.collectRunning.Store(0)
 
 			w.runCollect(ctx)
 			w.summaryProjectUsage(ctx)
 		}()
 	}
 
-	running = atomic.LoadUint32(&w.statusRunning)
+	running = w.statusRunning.Load()
 	if running == 0 && time.Since(w.lastStatus) > 6*time.Hour {
 		w.lastStatus = time.Now()
 		go func() {
-			atomic.StoreUint32(&w.statusRunning, 1)
-			defer atomic.StoreUint32(&w.statusRunning, 0)
+			w.statusRunning.Store(1)
+			defer w.statusRunning.Store(0)
 
 			w.runStatus()
 		}()
@@ -446,7 +446,7 @@ func (w *Worker) createDomain(ctx context.Context, d *domain) error {
 	sslConfig := cloudflare.CustomHostnameSSL{
 		Method:               "txt",
 		Type:                 "dv",
-		Wildcard:             lo.ToPtr(d.Wildcard),
+		Wildcard:             new(d.Wildcard),
 		CertificateAuthority: "google", // google, lets_encrypt
 		Settings:             sslSettings,
 	}
@@ -457,8 +457,7 @@ func (w *Worker) createDomain(ctx context.Context, d *domain) error {
 		SSL:                &sslConfig,
 	})
 	{
-		var serr *cloudflare.RequestError
-		if errors.As(err, &serr) {
+		if serr, ok := errors.AsType[*cloudflare.RequestError](err); ok {
 			if lo.Contains(serr.ErrorCodes(), 1407) {
 				// Invalid custom hostname.
 				// Custom hostnames have to be smaller than 256 characters in length,
@@ -504,8 +503,7 @@ func (w *Worker) deleteDomain(ctx context.Context, d *domain) error {
 
 	hostnameID, err := w.Client.CustomHostnameIDByName(ctx, w.ZoneID, d.Domain)
 	{
-		var serr *cloudflare.RequestError
-		if errors.As(err, &serr) {
+		if serr, ok := errors.AsType[*cloudflare.RequestError](err); ok {
 			if lo.Contains(serr.ErrorCodes(), 1407) {
 				return deleteDomain()
 			}
@@ -756,27 +754,22 @@ func (w *Worker) runCollect(ctx context.Context) {
 	}
 
 	for _, d := range domains {
-		d := d
 		slog.Info("collecting", "domain", d.Domain, "project", d.ProjectID)
 		var wg sync.WaitGroup
 		if runYday {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				err := w.collectCacheHit(ctx, d, yday)
 				if err != nil {
 					slog.Error("can not collect cache hit", "domain", d.Domain, "error", err)
 				}
-			}()
+			})
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			err := w.collectCacheHit(ctx, d, today)
 			if err != nil {
 				slog.Error("can not collect cache hit", "domain", d.Domain, "error", err)
 			}
-		}()
+		})
 		wg.Wait()
 	}
 }
